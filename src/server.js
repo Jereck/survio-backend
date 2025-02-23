@@ -13,6 +13,15 @@ pool.connect()
   .then(() => console.log('Connected to Neon DB'))
   .catch(err => console.error('Error connecting to Neon DB: ', err));
 
+// Keeps the Renderer connection alive 
+setInterval(async () => {
+  try {
+    await pool.query("SELECT 1"); // Keeps the connection alive
+    console.log("✅ Database connection kept alive.");
+  } catch (error) {
+    console.error("⚠️ Database keep-alive error:", error);
+  }
+}, 60000);
 
 const authRoutes = require('./routes/authRoutes');
 const teamRoutes = require('./routes/teamRoutes');
