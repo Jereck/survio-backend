@@ -1,13 +1,10 @@
 const express = require("express");
 const authMiddleware = require('../middlewares/authMiddleware');
 const roleMiddleware = require('../middlewares/roleMiddleware');
-const { Pool } = require("pg");
+const pool = require("../config/database");
 
 const router = express.Router();
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
+
 
 // ✅ Submit a survey response (Public Access)
 router.post("/:surveyId", async (req, res) => {

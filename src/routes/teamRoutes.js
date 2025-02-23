@@ -5,15 +5,10 @@ const bcrypt = require("bcrypt");
 const authMiddleware = require('../middlewares/authMiddleware');
 const roleMiddleware = require('../middlewares/roleMiddleware');
 const sendEmail = require('../utils/email');
-const { Pool } = require('pg');
+const pool = require('../config/database');
 
 const router = express.Router();
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
+
 
 // ✅ Get all teams the user is part of
 router.get("/", authMiddleware, async (req, res) => {

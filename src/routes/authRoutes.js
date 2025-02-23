@@ -2,14 +2,10 @@ const express = require('express')
 const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
 const { body, validationResult } = require('express-validator')
-const { Pool } = require('pg')
+const pool = require('../config/database')
 const generateToken = require('../utils/auth')
 
 const router = express.Router()
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-})
 
 router.post(
   '/register', 
