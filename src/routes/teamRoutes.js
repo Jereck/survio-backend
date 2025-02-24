@@ -106,49 +106,79 @@ router.post("/invite", authMiddleware, async (req, res) => {
 // ✅ Accept an invite to join a team
 router.post("/accept-invite", async (req, res) => {
   const { token } = req.body;
-  console.log(`Received Token: ${token}`);
 
   try {
-    // Step 1: Check if the invite token exists
+    // Find the invite
     const inviteCheck = await pool.query("SELECT * FROM team_invites WHERE token = $1", [token]);
     if (inviteCheck.rows.length === 0) {
-      console.error("❌ Invite not found for token:", token);
       return res.status(404).json({ message: "Invite not found" });
     }
 
-    const { email, role } = inviteCheck.rows[0];
-    console.log(`✅ Invite Found: Email: ${email}, Role: ${role}`);
+    const { team_id, email, role } = inviteCheck.rows[0];
 
-    // Step 2: Check if the user already exists
-    let userCheck = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+    // Ensure user exists or create new one
+    let userResult = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
 
     let userId;
-    if (userCheck.rows.length === 0) {
-      console.log(`🆕 Creating new user for email: ${email}`);
-
-      // 🔥 FIX: Do not hash password here. Store it as null.
-      const newUser = await pool.query(
-        "INSERT INTO users (email, password, role, needs_password_setup) VALUES ($1, $2, $3, $4) RETURNING id",
-        [email, null, role, true] // ✅ Password is NULL until set by user
+    if (userResult.rows.length === 0) {
+      userResult = await pool.query(
+        "INSERT INTO users (email, role, needs_password_setup) VALUES ($1, $2, true) RETURNING *",
+        [email, role]
       );
-      userId = newUser.rows[0].id;
+      userId = userResult.rows[0].id;
     } else {
-      userId = userCheck.rows[0].id;
+      userId = userResult.rows[0].id;
     }
 
-    console.log(`🔹 User ID: ${userId}, Assigned Role: ${role}`);
+    // Find the owner of this team (assumes each team has one owner)
+    const ownerResult = await pool.query(
+      "SELECT users.id, users.stripe_subscription_id FROM users JOIN teams ON users.id = teams.owner_id WHERE teams.id = $1",
+      [team_id]
+    );
 
-    // Step 3: Delete the invite since it has been used
+    if (ownerResult.rows.length === 0) {
+      return res.status(500).json({ message: "Owner not found for this team" });
+    }
+
+    const { id: ownerId, stripe_subscription_id } = ownerResult.rows[0];
+
+    // Ensure the team doesn't exceed seat limits
+    const memberCount = await pool.query(
+      "SELECT COUNT(*) FROM users WHERE owner_id = $1",
+      [ownerId]
+    );
+
+    const planLimits = { free_monthly: 2, hobby_monthly: 5, pro_monthly: 100 };
+    const ownerPlan = await pool.query(
+      "SELECT subscription_plan FROM users WHERE id = $1",
+      [ownerId]
+    );
+
+    const maxSeats = planLimits[ownerPlan.rows[0].subscription_plan] || 2; // Default to 2 for safety
+
+    if (parseInt(memberCount.rows[0].count) >= maxSeats) {
+      return res.status(403).json({ message: "Seat limit reached. Upgrade plan to add more members." });
+    }
+
+    // Add user to the team and associate with subscription
+    await pool.query(
+      "INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, $3)",
+      [team_id, userId, role]
+    );
+
+    // Link the new user to the owner's subscription
+    await pool.query(
+      "UPDATE users SET owner_id = $1, stripe_subscription_id = $2 WHERE id = $3",
+      [ownerId, stripe_subscription_id, userId]
+    );
+
+    // Delete the invite
     await pool.query("DELETE FROM team_invites WHERE token = $1", [token]);
 
-    console.log(`✅ User ${userId} successfully registered.`);
-    
-    // Redirect user to "Set Password" page
-    res.status(200).json({ message: "Account created. Please set your password.", userId });
-
+    res.status(200).json({ message: "Invite accepted successfully" });
   } catch (error) {
-    console.error("❌ Error accepting invite:", error);
-    res.status(500).json({ message: "Failed to complete registration" });
+    console.error("Error accepting invite: ", error);
+    res.status(500).json({ message: "Failed to join team" });
   }
 });
 
