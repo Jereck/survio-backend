@@ -9,7 +9,6 @@ const pool = require('../config/database');
 
 const router = express.Router();
 
-
 // ✅ Get all teams the user is part of
 router.get("/", authMiddleware, async (req, res) => {
   const userId = req.user.userId;

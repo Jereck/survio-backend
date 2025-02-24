@@ -3,31 +3,43 @@ const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
 const { body, validationResult } = require('express-validator')
 const pool = require('../config/database')
+const Stripe = require("stripe");
 const generateToken = require('../utils/auth')
+require("dotenv").config();
 
 const router = express.Router()
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 router.post('/register', async (req, res) => {
-    const { email, password, subscription_plan } = req.body
-    const hashedPassword = await bcrypt.hash(password, 10)
+    const { email, password, username, first_name, last_name, subscription_plan } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     try {
+      // 🔹 Create a new Stripe customer at signup
+      console.log("🔹 Creating Stripe customer for:", email);
+      const customer = await stripe.customers.create({ email });
+
+      // 🔹 Store user with Stripe customer ID
       const query = {
-        text: `INSERT INTO users(email, password, role, subscription_plan, subscription_status) VALUES($1, $2, 'owner', $3, 'pending_payment') RETURNING *`,
-        values: [email, hashedPassword, subscription_plan],
-      }
-      const result = await pool.query(query)
+        text: `
+          INSERT INTO users(email, password, role, username, first_name, last_name, subscription_plan, subscription_status, stripe_customer_id) 
+          VALUES($1, $2, 'owner', $3, $4, $5, $6, 'pending_payment', $7) RETURNING *`,
+        values: [email, hashedPassword, username, first_name, last_name, subscription_plan, customer.id],
+      };
+      const result = await pool.query(query);
 
-      const user = result.rows[0]
+      const newUser = result.rows[0];
 
-      const token = generateToken(user)
-      res.status(201).json({ user, token, message: "User registered, proceed to payment." })
+      console.log("✅ User Registered with Stripe Customer ID:", customer.id);
+
+      const token = generateToken(newUser);
+
+      res.status(201).json({ user: newUser, token, message: "User registered, proceed to payment." });
     } catch (error) {
       console.error("Signup Error:", error);
-      res.status(500).json({ error: error.message })
+      res.status(500).json({ error: error.message });
     }
-  }
-);
+});
 
 router.post(
   '/login',

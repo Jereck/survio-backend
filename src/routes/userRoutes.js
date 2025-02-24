@@ -18,6 +18,26 @@ router.get("/", authMiddleware, roleMiddleware(["owner", "admin"]), async (req, 
   }
 });
 
+router.get("/subscription", authMiddleware, async (req, res) => {
+  const userId = req.user.userId;
+
+  try {
+    const result = await pool.query(
+      "SELECT stripe_customer_id, stripe_subscription_id, subscription_plan, subscription_status FROM users WHERE id = $1",
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.status(200).json(result.rows[0]);
+  } catch (error) {
+    console.error("Error fetching subscription:", error);
+    res.status(500).json({ message: "Failed to fetch subscription" });
+    
+  }
+});
+
 // ✅ Assign user to a team
 router.post("/assign-team", authMiddleware, roleMiddleware(["owner", "admin"]), async (req, res) => {
   const { userId, teamId } = req.body;

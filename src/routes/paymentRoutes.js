@@ -1,6 +1,5 @@
 const express = require("express");
 const Stripe = require("stripe");
-const authMiddleware = require("../middlewares/authMiddleware");
 const pool = require('../config/database');
 require("dotenv").config();
 
@@ -12,14 +11,22 @@ router.post("/create-checkout-session", async (req, res) => {
 
   try {
     // Fetch user from database
-    const user = await pool.query("SELECT * FROM users WHERE id = $1", [user_id]);
+    const userResult = await pool.query("SELECT * FROM users WHERE id = $1", [user_id]);
 
-    if (user.rows.length === 0) return res.status(404).json({ message: "User not found" });
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
 
-    // Create Stripe Customer
-    const customer = await stripe.customers.create({
-      email: user.rows[0].email,
-    });
+    const user = userResult.rows[0];
+
+    // 🔹 Use existing Stripe customer ID (DO NOT CREATE A NEW CUSTOMER)
+    const customerId = user.stripe_customer_id;
+    if (!customerId) {
+      console.error("❌ Stripe customer ID missing in database!");
+      return res.status(500).json({ message: "Stripe customer ID missing" });
+    }
+
+    console.log("🔹 Using existing Stripe customer ID:", customerId);
 
     // Fetch price from Stripe using lookup_key
     const prices = await stripe.prices.list({
@@ -36,7 +43,7 @@ router.post("/create-checkout-session", async (req, res) => {
 
     // Create Stripe Checkout Session
     const session = await stripe.checkout.sessions.create({
-      customer: customer.id,
+      customer: customerId,
       billing_address_collection: "auto",
       line_items: [{ price: priceId, quantity: 1 }],
       mode: "subscription",
@@ -44,10 +51,10 @@ router.post("/create-checkout-session", async (req, res) => {
       cancel_url: `${process.env.FRONTEND_URL}/pricing?canceled=true`,
     });
 
-    // Update user with Stripe details
+    // 🔥 Set subscription as "pending_payment" until webhook updates it
     await pool.query(
-      "UPDATE users SET stripe_customer_id = $1, subscription_plan = $2, subscription_status = 'pending_payment' WHERE id = $3",
-      [customer.id, lookup_key, user_id]
+      "UPDATE users SET subscription_plan = $1, subscription_status = 'pending_payment' WHERE id = $2",
+      [lookup_key, user_id]
     );
 
     res.json({ url: session.url });

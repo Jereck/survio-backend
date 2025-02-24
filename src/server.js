@@ -43,7 +43,6 @@ app.get("/", (req, res) => {
   res.send("Survur.io API is running!");
 });
 
-
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 app.post(
@@ -71,25 +70,36 @@ app.post(
         subscription = event.data.object;
         status = subscription.status;
         customerId = subscription.customer;
+        const subscriptionId = subscription.id;
+        const planType = subscription.items.data[0]?.price.lookup_key || "unknown_plan";
 
-        console.log(`✅ Subscription Updated: ${subscription.id} | Status: ${status}`);
+        console.log(`✅ Webhook Triggered: Subscription Event`);
+        console.log(`🔹 Subscription ID: ${subscriptionId}`);
+        console.log(`🔹 Status: ${status}`);
+        console.log(`🔹 Customer ID: ${customerId}`);
+        console.log(`🔹 Plan: ${planType}`);
 
-        // Get user's ID from our database
+        // 🔹 Find the user by `stripe_customer_id`
         const userResult = await pool.query("SELECT id FROM users WHERE stripe_customer_id = $1", [customerId]);
+
         if (userResult.rows.length === 0) {
-          console.log("⚠️ User not found for this Stripe customer ID");
+          console.log("⚠️ User not found for this Stripe customer ID:", customerId);
           return response.sendStatus(400);
         }
 
         const userId = userResult.rows[0].id;
-        const planType = subscription.items.data[0].price.lookup_key; // e.g., "free_monthly"
 
-        // Store subscription details in the database
-        await pool.query(
-          "UPDATE users SET stripe_subscription_id = $1, subscription_status = $2, subscription_plan = $3 WHERE id = $4",
-          [subscription.id, status, planType, userId]
-        );
+        console.log(`✅ Updating DB for User ID: ${userId}`);
 
+        // 🔥 Update `stripe_subscription_id`, `subscription_status`, and `owner_id`
+        const updateQuery = `
+          UPDATE users 
+          SET stripe_subscription_id = $1, subscription_status = $2, subscription_plan = $3, owner_id = $4 
+          WHERE id = $5
+        `;
+        await pool.query(updateQuery, [subscriptionId, status, planType, userId, userId]);
+
+        console.log(`✅ Database Updated for User ${userId} | Subscription: ${subscriptionId}`);
         break;
 
       case "customer.subscription.deleted":
@@ -102,14 +112,15 @@ app.post(
         const userRes = await pool.query("SELECT id FROM users WHERE stripe_customer_id = $1", [customerId]);
         if (userRes.rows.length > 0) {
           const userId = userRes.rows[0].id;
-          
-          // Set their status to inactive & downgrade them to Free
+
+          // 🔥 Set their status to inactive & downgrade them to Free
           await pool.query(
             "UPDATE users SET subscription_status = 'inactive', subscription_plan = 'free_monthly' WHERE id = $1",
             [userId]
           );
-        }
 
+          console.log(`✅ User ${userId} downgraded to Free`);
+        }
         break;
 
       default:
@@ -119,6 +130,7 @@ app.post(
     response.sendStatus(200);
   }
 );
+
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
