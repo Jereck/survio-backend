@@ -7,29 +7,23 @@ const generateToken = require('../utils/auth')
 
 const router = express.Router()
 
-router.post(
-  '/register', 
-  [
-    body('email').isEmail(),
-    body('password').isLength({ min: 6 }),
-  ],
-  async (req, res) => {
-    const errors = validationResult(req)
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() })
-    }
-
-    const { email, password } = req.body
+router.post('/register', async (req, res) => {
+    const { email, password, subscription_plan } = req.body
     const hashedPassword = await bcrypt.hash(password, 10)
 
     try {
       const query = {
-        text: 'INSERT INTO users(email, password) VALUES($1, $2) RETURNING *',
-        values: [email, hashedPassword],
+        text: `INSERT INTO users(email, password, role, subscription_plan, subscription_status) VALUES($1, $2, 'owner', $3, 'pending_payment') RETURNING *`,
+        values: [email, hashedPassword, subscription_plan],
       }
       const result = await pool.query(query)
-      res.status(201).json(result.rows[0])
+
+      const user = result.rows[0]
+
+      const token = generateToken(user)
+      res.status(201).json({ user, token, message: "User registered, proceed to payment." })
     } catch (error) {
+      console.error("Signup Error:", error);
       res.status(500).json({ error: error.message })
     }
   }

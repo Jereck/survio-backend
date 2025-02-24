@@ -7,37 +7,21 @@ require("dotenv").config();
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-router.post("/create-checkout-session", authMiddleware, async (req, res) => {
+router.post("/create-checkout-session", async (req, res) => {
+  const { user_id, lookup_key } = req.body;
+
   try {
-    const { lookup_key } = req.body;
-    const userId = req.user.userId;
+    // Fetch user from database
+    const user = await pool.query("SELECT * FROM users WHERE id = $1", [user_id]);
 
-    // Fetch user details from the database
-    const userResult = await pool.query("SELECT * FROM users WHERE id = $1", [userId]);
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({ message: "User not found" });
-    }
-    const user = userResult.rows[0];
+    if (user.rows.length === 0) return res.status(404).json({ message: "User not found" });
 
-    let stripeCustomerId = user.stripe_customer_id;
+    // Create Stripe Customer
+    const customer = await stripe.customers.create({
+      email: user.rows[0].email,
+    });
 
-    // If user has no Stripe customer ID, create one
-    if (!stripeCustomerId) {
-      const customer = await stripe.customers.create({
-        email: user.email,
-        metadata: { userId },
-      });
-
-      stripeCustomerId = customer.id;
-
-      // Store the Stripe customer ID in the database
-      await pool.query(
-        "UPDATE users SET stripe_customer_id = $1 WHERE id = $2",
-        [stripeCustomerId, userId]
-      );
-    }
-
-    // Fetch price using the lookup key
+    // Fetch price from Stripe using lookup_key
     const prices = await stripe.prices.list({
       lookup_keys: [lookup_key],
       expand: ["data.product"],
@@ -50,9 +34,9 @@ router.post("/create-checkout-session", authMiddleware, async (req, res) => {
 
     const priceId = prices.data[0].id;
 
-    // Create a Checkout session
+    // Create Stripe Checkout Session
     const session = await stripe.checkout.sessions.create({
-      customer: stripeCustomerId,
+      customer: customer.id,
       billing_address_collection: "auto",
       line_items: [{ price: priceId, quantity: 1 }],
       mode: "subscription",
@@ -60,9 +44,13 @@ router.post("/create-checkout-session", authMiddleware, async (req, res) => {
       cancel_url: `${process.env.FRONTEND_URL}/pricing?canceled=true`,
     });
 
-    console.log("✅ Stripe Checkout Session Created:", session);
-    res.json({ url: session.url });
+    // Update user with Stripe details
+    await pool.query(
+      "UPDATE users SET stripe_customer_id = $1, subscription_plan = $2, subscription_status = 'pending_payment' WHERE id = $3",
+      [customer.id, lookup_key, user_id]
+    );
 
+    res.json({ url: session.url });
   } catch (error) {
     console.error("❌ Stripe Checkout Error:", error);
     res.status(500).json({ message: "Failed to create Stripe session" });
