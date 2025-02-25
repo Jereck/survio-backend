@@ -10,14 +10,16 @@ const {
   addQuestion,
   getAllQuestions,
   submitResponse,
-  getSurveyResponses
+  getSurveyResponses,
+  updateSurvey
 } = require('../controllers/survey.controller');
 
 const router = express.Router();
 
-router.get('/', authMiddleware, getSurveys);
 router.post('/', authMiddleware, roleMiddleware(["owner", "admin"]), createSurvey);
+router.get('/', authMiddleware, getSurveys);
 router.get('/:id', authMiddleware, getSurvey);
+router.put('/:id', authMiddleware, updateSurvey);
 router.delete('/:id', authMiddleware, roleMiddleware(["owner"]), deleteSurvey);
 
 router.post('/:id/questions', authMiddleware, roleMiddleware(["owner", "admin"]), addQuestion);

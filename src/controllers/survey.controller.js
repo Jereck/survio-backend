@@ -49,6 +49,23 @@ const getSurvey = async (req, res) => {
   }
 }
 
+// ✅ Update a Survey
+const updateSurvey = async (req, res) => {
+  const { id } = req.params;
+  const { title, description } = req.body;
+
+  try {
+    const result = await pool.query(
+      `UPDATE surveys SET title = $1, description = $2 WHERE id = $3 RETURNING *`,
+      [title, description, id]
+    );
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Error updating survey: ", error);
+    res.status(500).json({ message: 'Failed to update survey' });
+  }
+}
+
 // ✅ Delete a Survey (Only Owners Can Delete)
 const deleteSurvey = async (req, res) => {
   const { id } = req.params;
@@ -152,6 +169,7 @@ module.exports = {
   createSurvey,
   getSurveys,
   getSurvey,
+  updateSurvey,
   deleteSurvey,
   addQuestion,
   getAllQuestions,
